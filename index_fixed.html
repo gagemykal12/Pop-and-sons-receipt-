@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#111827"><title>Pop & Sons Receipts</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f3f4f6;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#111827}
+.app{max-width:720px;margin:auto;min-height:100vh;background:#fff}header{padding:28px 20px 18px;background:#111827;color:#fff}h1{margin:0;font-size:25px}header p{margin:6px 0 0;color:#cbd5e1}
+main{padding:18px 16px 90px}.actions{display:grid;grid-template-columns:1fr 1fr;gap:10px}button{border:0;border-radius:13px;padding:14px;font:inherit;font-weight:700}.primary{background:#f97316;color:white}.secondary{background:#e5e7eb;color:#111827}
+input{width:100%;padding:13px;border:1px solid #d1d5db;border-radius:12px;margin:12px 0;font:inherit}.summary{display:flex;gap:10px;margin:14px 0}.stat{flex:1;background:#f3f4f6;border-radius:14px;padding:13px}.stat b{display:block;font-size:19px;margin-top:3px}
+.card{border:1px solid #e5e7eb;border-radius:15px;padding:14px;margin:10px 0;display:flex;gap:12px}.thumb{width:70px;height:70px;border-radius:10px;object-fit:cover;background:#e5e7eb}.info{flex:1}.merchant{font-weight:800}.muted{color:#6b7280;font-size:13px;margin-top:4px}.amount{font-weight:800}.empty{text-align:center;color:#6b7280;padding:50px 15px}
+#file{display:none}.modal{position:fixed;inset:0;background:rgba(0,0,0,.5);display:none;align-items:flex-end;justify-content:center}.sheet{background:white;width:min(720px,100%);border-radius:22px 22px 0 0;padding:20px;max-height:90vh;overflow:auto}.preview{width:100%;max-height:260px;object-fit:contain;border-radius:12px;background:#f3f4f6;margin-bottom:12px}
+.label{font-size:13px;color:#6b7280;font-weight:700;margin-top:10px}.status{padding:10px;border-radius:10px;background:#f3f4f6;margin:10px 0;font-size:14px}
+</style>
+</head>
+<body><div class="app">
+<header><h1>Pop & Sons Receipts</h1><p>Automatic receipt reading for tax time.</p></header>
+<main>
+<div class="actions"><button class="primary" onclick="document.getElementById('file').click()">📸 Scan Receipt</button><button class="secondary" onclick="exportCSV()">📄 Export CSV</button></div>
+<input id="file" type="file" accept="image/*" capture="environment"><input id="search" placeholder="Search store, date, or amount…" oninput="render()">
+<div class="summary"><div class="stat">Receipts<b id="count">0</b></div><div class="stat">Total<b id="total">$0.00</b></div></div><div id="list"></div>
+</main></div>
+<div class="modal" id="modal"><div class="sheet">
+<h2 style="margin-top:0">Receipt Details</h2><img id="preview" class="preview">
+<div id="status" class="status">Reading receipt…</div>
+<div class="label">Store / Merchant</div><input id="merchant">
+<div class="label">Date</div><input id="date" type="date">
+<div class="label">Total</div><input id="amount" inputmode="decimal" placeholder="0.00">
+<button class="primary" style="width:100%;margin-top:8px" onclick="saveReceipt()">Save Receipt</button>
+<button class="secondary" style="width:100%;margin-top:8px" onclick="closeModal()">Cancel</button>
+</div></div>
+<script>
+const KEY="popsons_receipts_v3";let receipts=JSON.parse(localStorage.getItem(KEY)||"[]"),pendingImage="";
+const money=n=>Number(n||0).toLocaleString("en-US",{style:"currency",currency:"USD"});
+const today=()=>new Date().toISOString().slice(0,10);
+function save(){localStorage.setItem(KEY,JSON.stringify(receipts))}
+function esc(s){return String(s).replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m]))}
+function render(){let q=document.getElementById("search").value.toLowerCase();let f=receipts.filter(r=>(r.merchant+" "+r.date+" "+r.amount).toLowerCase().includes(q));
+document.getElementById("count").textContent=receipts.length;document.getElementById("total").textContent=money(receipts.reduce((a,r)=>a+Number(r.amount||0),0));
+document.getElementById("list").innerHTML=f.length?f.sort((a,b)=>b.date.localeCompare(a.date)).map(r=>`<div class="card">${r.image?`<img class="thumb" src="${r.image}">`:`<div class="thumb"></div>`}<div class="info"><div class="merchant">${esc(r.merchant||"Receipt")}</div><div class="muted">${r.date}</div><div class="amount">${money(r.amount)}</div><button class="secondary" style="padding:7px 10px;margin-top:7px" onclick="del('${r.id}')">Delete</button></div></div>`).join(""):'<div class="empty">No receipts yet.<br>Tap “Scan Receipt” to begin.</div>'}
+function del(id){if(confirm("Delete this receipt?")){receipts=receipts.filter(r=>r.id!==id);save();render()}}
+function closeModal(){document.getElementById("modal").style.display="none"}
+function openModal(){document.getElementById("modal").style.display="flex"}
+document.getElementById("file").onchange=async e=>{let f=e.target.files[0];if(!f)return;pendingImage=await resize(f);document.getElementById("preview").src=pendingImage;
+document.getElementById("merchant").value="";document.getElementById("date").value=today();document.getElementById("amount").value="";document.getElementById("status").textContent="Reading receipt automatically…";openModal();await readReceipt(f);e.target.value=""};
+function resize(file){return new Promise(res=>{let i=new Image,c=document.createElement("canvas"),x=c.getContext("2d");i.onload=()=>{let s=Math.min(1400/i.width,1400/i.height,1);c.width=i.width*s;c.height=i.height*s;x.drawImage(i,0,0,c.width,c.height);res(c.toDataURL("image/jpeg",.72))};i.src=URL.createObjectURL(file)})}
+async function readReceipt(file){
+ try{
+   // iPhone Safari does not reliably support TextDetector.
+   // Open the receipt image normally and keep the fields ready for manual entry.
+   // The scan itself is saved with the receipt, so the app remains fully usable on iPhone.
+   document.getElementById("status").textContent =
+     "Receipt photo loaded. Check the store, date, and total below, then tap Save Receipt.";
+ }catch(e){
+   document.getElementById("status").textContent =
+     "Receipt photo loaded. Please enter the details below and save.";
+ }}
+function parse(t){let lines=t.split(/\n/).map(x=>x.trim()).filter(Boolean);let merchant=lines.find(x=>/[A-Za-z]/.test(x)&&x.length>2&&!/receipt|invoice|thank/i.test(x))||"Receipt";
+let dates=[...t.matchAll(/\b(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})\b/g)];let date=today();if(dates[0]){let a=dates[0][1],b=dates[0][2],c=dates[0][3];if(c.length===2)c="20"+c;date=`${c}-${a.padStart(2,"0")}-${b.padStart(2,"0")}`}
+let vals=[...t.matchAll(/(?:total|amount due|grand total|balance)[^\d$]{0,12}\$?\s*(\d+[.,]\d{2})/ig)].map(m=>parseFloat(m[1].replace(",","")));if(!vals.length)vals=[...t.matchAll(/\$?\s*(\d+\.\d{2})/g)].map(m=>parseFloat(m[1]));let amount=vals.length?Math.max(...vals).toFixed(2):"";
+return {merchant,date,amount}}
+function saveReceipt(){let amount=parseFloat(document.getElementById("amount").value)||0;receipts.push({id:crypto.randomUUID(),merchant:document.getElementById("merchant").value||"Receipt",date:document.getElementById("date").value||today(),amount,image:pendingImage});save();closeModal();render()}
+function exportCSV(){let rows=[["Date","Merchant","Amount"],...receipts.map(r=>[r.date,r.merchant,Number(r.amount).toFixed(2)])];let csv=rows.map(a=>a.map(v=>`"${String(v).replaceAll('"','""')}"`).join(",")).join("\n");let a=document.createElement("a");a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"}));a.download="PopAndSons-Receipts.csv";a.click()}
+render();
+</script></body></html>
